@@ -14,6 +14,22 @@ from fla.ops.utils import prepare_chunk_indices, prepare_chunk_offsets
 from fla.ops.utils.op import exp, exp2
 from fla.utils import IS_NVIDIA_BLACKWELL, IS_NVIDIA_HOPPER, USE_CUDA_GRAPH, autotune_cache_kwargs, check_shared_mem
 
+if IS_NVIDIA_BLACKWELL:
+    @triton.jit
+    def safe_dot(a, b):
+        return tl.inline_asm_elementwise(
+            asm="mov.f32 $0, $1;",
+            constraints="=r,r",
+            args=[tl.dot(a, b)],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+else:
+    @triton.jit
+    def safe_dot(a, b):
+        return tl.dot(a, b)
+
 NUM_WARPS = [2, 4] if IS_NVIDIA_HOPPER else [2, 4, 8, 16]
 
 
@@ -163,30 +179,30 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
         p_w = tl.make_block_ptr(w, (T, K), (HV*K, 1), (i_t * BT, 0), (BT, 64), (1, 0))
         b_w = tl.load(p_w, boundary_check=(0, 1))
         if TRANSPOSE_STATE:
-            b_v = tl.dot(b_w, tl.trans(b_h1).to(b_w.dtype))
+            b_v = safe_dot(b_w, tl.trans(b_h1).to(b_w.dtype))
         else:
-            b_v = tl.dot(b_w, b_h1.to(b_w.dtype))
+            b_v = safe_dot(b_w, b_h1.to(b_w.dtype))
         if K > 64:
             p_w = tl.make_block_ptr(w, (T, K), (HV*K, 1), (i_t * BT, 64), (BT, 64), (1, 0))
             b_w = tl.load(p_w, boundary_check=(0, 1))
             if TRANSPOSE_STATE:
-                b_v += tl.dot(b_w, tl.trans(b_h2).to(b_w.dtype))
+                b_v += safe_dot(b_w, tl.trans(b_h2).to(b_w.dtype))
             else:
-                b_v += tl.dot(b_w, b_h2.to(b_w.dtype))
+                b_v += safe_dot(b_w, b_h2.to(b_w.dtype))
         if K > 128:
             p_w = tl.make_block_ptr(w, (T, K), (HV*K, 1), (i_t * BT, 128), (BT, 64), (1, 0))
             b_w = tl.load(p_w, boundary_check=(0, 1))
             if TRANSPOSE_STATE:
-                b_v += tl.dot(b_w, tl.trans(b_h3).to(b_w.dtype))
+                b_v += safe_dot(b_w, tl.trans(b_h3).to(b_w.dtype))
             else:
-                b_v += tl.dot(b_w, b_h3.to(b_w.dtype))
+                b_v += safe_dot(b_w, b_h3.to(b_w.dtype))
         if K > 192:
             p_w = tl.make_block_ptr(w, (T, K), (HV*K, 1), (i_t * BT, 192), (BT, 64), (1, 0))
             b_w = tl.load(p_w, boundary_check=(0, 1))
             if TRANSPOSE_STATE:
-                b_v += tl.dot(b_w, tl.trans(b_h4).to(b_w.dtype))
+                b_v += safe_dot(b_w, tl.trans(b_h4).to(b_w.dtype))
             else:
-                b_v += tl.dot(b_w, b_h4.to(b_w.dtype))
+                b_v += safe_dot(b_w, b_h4.to(b_w.dtype))
         p_v = tl.make_block_ptr(v, (T, V), (HV*V, 1), (i_t * BT, i_v * BV), (BT, BV), (1, 0))
         b_v = tl.load(p_v, boundary_check=(0, 1)) - b_v
 
@@ -272,30 +288,30 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
         p_k = tl.make_block_ptr(k, (K, T), (1, H*K), (0, i_t * BT), (64, BT), (0, 1))
         b_k = tl.load(p_k, boundary_check=(0, 1))
         if TRANSPOSE_STATE:
-            b_h1 += tl.trans(tl.dot(b_k, b_v))
+            b_h1 += tl.trans(safe_dot(b_k, b_v))
         else:
-            b_h1 += tl.dot(b_k, b_v)
+            b_h1 += safe_dot(b_k, b_v)
         if K > 64:
             p_k = tl.make_block_ptr(k, (K, T), (1, H*K), (64, i_t * BT), (64, BT), (0, 1))
             b_k = tl.load(p_k, boundary_check=(0, 1))
             if TRANSPOSE_STATE:
-                b_h2 += tl.trans(tl.dot(b_k, b_v))
+                b_h2 += tl.trans(safe_dot(b_k, b_v))
             else:
-                b_h2 += tl.dot(b_k, b_v)
+                b_h2 += safe_dot(b_k, b_v)
         if K > 128:
             p_k = tl.make_block_ptr(k, (K, T), (1, H*K), (128, i_t * BT), (64, BT), (0, 1))
             b_k = tl.load(p_k, boundary_check=(0, 1))
             if TRANSPOSE_STATE:
-                b_h3 += tl.trans(tl.dot(b_k, b_v))
+                b_h3 += tl.trans(safe_dot(b_k, b_v))
             else:
-                b_h3 += tl.dot(b_k, b_v)
+                b_h3 += safe_dot(b_k, b_v)
         if K > 192:
             p_k = tl.make_block_ptr(k, (K, T), (1, H*K), (192, i_t * BT), (64, BT), (0, 1))
             b_k = tl.load(p_k, boundary_check=(0, 1))
             if TRANSPOSE_STATE:
-                b_h4 += tl.trans(tl.dot(b_k, b_v))
+                b_h4 += tl.trans(safe_dot(b_k, b_v))
             else:
-                b_h4 += tl.dot(b_k, b_v)
+                b_h4 += safe_dot(b_k, b_v)
 
     if STORE_FINAL_STATE:
         if TRANSPOSE_STATE:
@@ -493,9 +509,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
             o_k1 = tl.arange(0, 64)
             b_gk_last1 = tl.load(gk + last_idx * HV*K + o_k1, mask=(o_k1 < K), other=0.).to(tl.float32)
         if TRANSPOSE_STATE:
-            b_dv = tl.dot(b_k, tl.trans(b_dh1).to(b_k.dtype))
+            b_dv = safe_dot(b_k, tl.trans(b_dh1).to(b_k.dtype))
         else:
-            b_dv = tl.dot(b_k, b_dh1.to(b_k.dtype))
+            b_dv = safe_dot(b_k, b_dh1.to(b_k.dtype))
 
         if K > 64:
             p_k = tl.make_block_ptr(k, (T, K), (H*K, 1), (i_t * BT, 64), (BT, 64), (1, 0))
@@ -504,9 +520,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                 o_k2 = 64 + o_k1
                 b_gk_last2 = tl.load(gk + last_idx * HV*K + o_k2, mask=(o_k2 < K), other=0.).to(tl.float32)
             if TRANSPOSE_STATE:
-                b_dv += tl.dot(b_k, tl.trans(b_dh2).to(b_k.dtype))
+                b_dv += safe_dot(b_k, tl.trans(b_dh2).to(b_k.dtype))
             else:
-                b_dv += tl.dot(b_k, b_dh2.to(b_k.dtype))
+                b_dv += safe_dot(b_k, b_dh2.to(b_k.dtype))
 
         if K > 128:
             p_k = tl.make_block_ptr(k, (T, K), (H*K, 1), (i_t * BT, 128), (BT, 64), (1, 0))
@@ -515,9 +531,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                 o_k3 = 128 + o_k1
                 b_gk_last3 = tl.load(gk + last_idx * HV*K + o_k3, mask=(o_k3 < K), other=0.).to(tl.float32)
             if TRANSPOSE_STATE:
-                b_dv += tl.dot(b_k, tl.trans(b_dh3).to(b_k.dtype))
+                b_dv += safe_dot(b_k, tl.trans(b_dh3).to(b_k.dtype))
             else:
-                b_dv += tl.dot(b_k, b_dh3.to(b_k.dtype))
+                b_dv += safe_dot(b_k, b_dh3.to(b_k.dtype))
 
         if K > 192:
             p_k = tl.make_block_ptr(k, (T, K), (H*K, 1), (i_t * BT, 192), (BT, 64), (1, 0))
@@ -526,9 +542,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                 o_k4 = 192 + o_k1
                 b_gk_last4 = tl.load(gk + last_idx * HV*K + o_k4, mask=(o_k4 < K), other=0.).to(tl.float32)
             if TRANSPOSE_STATE:
-                b_dv += tl.dot(b_k, tl.trans(b_dh4).to(b_k.dtype))
+                b_dv += safe_dot(b_k, tl.trans(b_dh4).to(b_k.dtype))
             else:
-                b_dv += tl.dot(b_k, b_dh4.to(b_k.dtype))
+                b_dv += safe_dot(b_k, b_dh4.to(b_k.dtype))
 
         if USE_G:
             m_t = (i_t * BT + tl.arange(0, BT)) < T
@@ -559,9 +575,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                 else:
                     b_dh1 *= exp(b_gk_last1[:, None])
         if TRANSPOSE_STATE:
-            b_dh1 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+            b_dh1 += tl.trans(safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype)))
         else:
-            b_dh1 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+            b_dh1 += safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype))
         if K > 64:
             p_q = tl.make_block_ptr(q, (K, T), (1, H*K), (64, i_t * BT), (64, BT), (0, 1))
             p_w = tl.make_block_ptr(w, (K, T), (1, HV*K), (64, i_t * BT), (64, BT), (0, 1))
@@ -582,9 +598,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                     else:
                         b_dh2 *= exp(b_gk_last2[:, None])
             if TRANSPOSE_STATE:
-                b_dh2 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+                b_dh2 += tl.trans(safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype)))
             else:
-                b_dh2 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+                b_dh2 += safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype))
         if K > 128:
             p_q = tl.make_block_ptr(q, (K, T), (1, H*K), (128, i_t * BT), (64, BT), (0, 1))
             p_w = tl.make_block_ptr(w, (K, T), (1, HV*K), (128, i_t * BT), (64, BT), (0, 1))
@@ -605,9 +621,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                     else:
                         b_dh3 *= exp(b_gk_last3[:, None])
             if TRANSPOSE_STATE:
-                b_dh3 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+                b_dh3 += tl.trans(safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype)))
             else:
-                b_dh3 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+                b_dh3 += safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype))
         if K > 192:
             p_q = tl.make_block_ptr(q, (K, T), (1, H*K), (192, i_t * BT), (64, BT), (0, 1))
             p_w = tl.make_block_ptr(w, (K, T), (1, HV*K), (192, i_t * BT), (64, BT), (0, 1))
@@ -628,9 +644,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                     else:
                         b_dh4 *= exp(b_gk_last4[:, None])
             if TRANSPOSE_STATE:
-                b_dh4 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+                b_dh4 += tl.trans(safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype)))
             else:
-                b_dh4 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+                b_dh4 += safe_dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - safe_dot(b_w, b_dv.to(b_w.dtype))
 
     if USE_INITIAL_STATE:
         if TRANSPOSE_STATE:
