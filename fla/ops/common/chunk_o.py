@@ -12,7 +12,7 @@ import triton.language as tl
 from fla.ops.common.backends import dispatch
 from fla.ops.utils import prepare_chunk_indices
 from fla.ops.utils.op import exp, exp2
-from fla.utils import IS_NVIDIA_HOPPER, TRITON_ABOVE_3_4_0, autotune_cache_kwargs, check_shared_mem
+from fla.utils import IS_NVIDIA_BLACKWELL, IS_NVIDIA_HOPPER, TRITON_ABOVE_3_4_0, autotune_cache_kwargs, check_shared_mem
 
 BKV_LIST = [64, 128] if check_shared_mem() else ([32, 64] if check_shared_mem('ada') else [32])
 NUM_WARPS = [2, 4] if IS_NVIDIA_HOPPER else [2, 4, 8]
@@ -25,9 +25,8 @@ NUM_WARPS = [2, 4] if IS_NVIDIA_HOPPER else [2, 4, 8]
 })
 @triton.autotune(
     configs=[
-        triton.Config({'BK': 128, 'BV': 128}, num_warps=8, num_stages=3),
-        triton.Config({'BK': 64, 'BV': 64}, num_warps=4, num_stages=3),
-        triton.Config({'BK': 32, 'BV': 32}, num_warps=2, num_stages=3),
+        triton.Config({'BK': BK, 'BV': BV}, num_warps=num_warps, num_stages=4 if IS_NVIDIA_BLACKWELL else 3)
+        for BK, BV, num_warps in [(128, 128, 8), (64, 64, 4), (32, 32, 2)]
     ],
     key=['H', 'HV', 'K', 'V', 'BT', 'TRANSPOSE_STATE'],
     **autotune_cache_kwargs,
@@ -149,7 +148,7 @@ def chunk_fwd_kernel_o(
     configs=[
         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
         for num_warps in NUM_WARPS
-        for num_stages in [2, 3, 4]
+        for num_stages in ([4] if IS_NVIDIA_BLACKWELL else [2, 3, 4])
     ],
     key=['H', 'HV', 'K', 'V', 'BT', 'BK', 'BV', 'USE_G', 'USE_G_GAMMA', 'USE_DW', 'TRANSPOSE_STATE'],
     **autotune_cache_kwargs,
@@ -348,7 +347,7 @@ def chunk_bwd_kernel_dqkwg(
     configs=[
         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
         for num_warps in NUM_WARPS
-        for num_stages in [2, 3, 4]
+        for num_stages in ([4] if IS_NVIDIA_BLACKWELL else [2, 3, 4])
     ],
     key=['H', 'HV', 'K', 'V', 'BT', 'BK', 'BV', 'USE_G', 'USE_G_GAMMA'],
     **autotune_cache_kwargs,
@@ -450,7 +449,7 @@ def chunk_bwd_kernel_dv(
     configs=[
         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
         for num_warps in NUM_WARPS
-        for num_stages in [2, 3, 4]
+        for num_stages in ([4] if IS_NVIDIA_BLACKWELL else [2, 3, 4])
     ],
     key=['H', 'HV', 'K', 'V', 'BT', 'BK', 'BV', 'USE_G'],
     **autotune_cache_kwargs,

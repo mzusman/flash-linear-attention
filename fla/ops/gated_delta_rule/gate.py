@@ -13,7 +13,7 @@ import triton.language as tl
 from fla.ops.utils.index import prepare_chunk_indices
 from fla.ops.utils.op import exp
 from fla.ops.utils.softplus import softplus
-from fla.utils import autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, input_guard
+from fla.utils import IS_NVIDIA_BLACKWELL, autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, input_guard
 
 
 def naive_gdn_gate(
@@ -227,7 +227,7 @@ def gdn_gate_bwd(
         triton.Config({'BT': BT}, num_warps=num_warps, num_stages=num_stages)
         for BT in [32, 64, 128]
         for num_warps in [1, 2, 4, 8]
-        for num_stages in [2, 3]
+        for num_stages in ([4] if IS_NVIDIA_BLACKWELL else [2, 3])
     ],
     key=['H'],
     **autotune_cache_kwargs,

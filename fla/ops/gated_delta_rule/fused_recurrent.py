@@ -11,7 +11,7 @@ import triton.language as tl
 
 from fla.ops.utils.op import exp, exp2
 from fla.ops.utils.softplus import softplus
-from fla.utils import input_guard
+from fla.utils import IS_NVIDIA_BLACKWELL, input_guard
 
 
 @triton.heuristics({
@@ -250,7 +250,7 @@ def fused_recurrent_gated_delta_rule_fwd(
         USE_EXP2=use_exp2,
         TRANSPOSE_STATE=transpose_state_layout,
         num_warps=1,
-        num_stages=3,
+        num_stages=4 if IS_NVIDIA_BLACKWELL else 3,
     )
     return o, final_state
 
